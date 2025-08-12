@@ -6,6 +6,23 @@ static UART_HandleTypeDef *s_uart = NULL;
 // Feedback flag to request device replies (0 = no feedback, 1 = feedback)
 static uint8_t s_feedback = 0;
 
+typedef enum {
+    RX_WAIT_START = 0,
+    RX_COLLECT,
+} RxState;
+static volatile RxState s_rx_state = RX_WAIT_START;
+static uint8_t s_rx_buf[10];
+typedef enum {
+    QS_WAITING = 0,
+    QS_ACK,
+    QS_ERROR,
+    QS_TIMEOUT,
+} QueryState;
+static volatile uint8_t s_rx_pos = 0;
+static volatile uint8_t query_state = QS_WAITING;
+// 1-byte buffer for HAL IT reception
+static uint8_t s_rx_byte_it = 0;
+
 // Frame constants for YX5200 serial protocol
 static const uint8_t YX5200_FRAME_START = 0x7E;
 static const uint8_t YX5200_FRAME_END = 0xEF;
@@ -35,12 +52,14 @@ typedef enum {
 
 // Query codes
 typedef enum {
+    YX5200_Q_DEVICE_PLUGGED_IN = 0x3A,
+    YX5200_Q_DEVICE_PULLED_OUT = 0x3B,
     YX5200_Q_IS_USB = 0x3C,
     YX5200_Q_IS_SD = 0x3D,
     YX5200_Q_IS_FLASH = 0x3E,
     YX5200_Q_INITIALIZE = 0x3F,
-    YX5200_Q_RETRANSMIT = 0x40,
-    YX5200_Q_RESPONSE = 0x41,
+    YX5200_Q_ERROR = 0x40,
+    YX5200_Q_FEEDBACK = 0x41,
     YX5200_Q_STATUS = 0x42,
     YX5200_Q_VOLUME = 0x43,
     YX5200_Q_EQUALIZER = 0x44,
@@ -62,11 +81,9 @@ static inline uint8_t hi8(uint16_t v) { return (uint8_t) ((v >> 8) & 0xFF); }
 
 // ---- Public: init ----
 
-void yx5200_init(UART_HandleTypeDef *huart, uint8_t feedback) {
+void yx5200_configure(UART_HandleTypeDef *huart, uint8_t feedback) {
   s_uart = huart;
   s_feedback = feedback ? 1u : 0u;
-
-  yx5200_send_command(YX5200_Q_INITIALIZE, 0);
 }
 
 // ---- Protocol helpers ----
@@ -99,22 +116,24 @@ static void yx5200_send_command(uint8_t cmd, uint16_t param) {
   frame[9] = YX5200_FRAME_END;
 
   HAL_UART_Transmit(s_uart, frame, sizeof(frame), HAL_MAX_DELAY);
-  HAL_Delay(100);
+  query_state = QS_WAITING;
+  if (s_feedback) {
+    uint32_t startTime = HAL_GetTick();
+    while (query_state != QS_ACK && query_state != QS_ERROR) {
+      if (HAL_GetTick() - startTime > 100) {
+        query_state = QS_TIMEOUT;
+        break;
+      }
+    }
+  } else {
+    HAL_Delay(100);
+  }
 }
 
 // ---- RX parser (state machine) ----
 
-typedef enum {
-    RX_WAIT_START = 0, RX_COLLECT
-} RxState;
-static RxState s_rx_state = RX_WAIT_START;
-static uint8_t s_rx_buf[10];
-static uint8_t s_rx_pos = 0;
-
-// 1-byte buffer for HAL IT reception
-static uint8_t s_rx_byte_it = 0;
-
-void yx5200_rx_reset_parser(void) {
+// Reset internal RX parser state
+static void yx5200_rx_reset_parser(void) {
   s_rx_state = RX_WAIT_START;
   s_rx_pos = 0;
 }
@@ -176,7 +195,8 @@ static void yx5200_parser_push(uint8_t b) {
   }
 }
 
-void yx5200_rx_process_byte(uint8_t byte) {
+// Feed single byte into the parser (call from your RX path)
+static void yx5200_rx_process_byte(uint8_t byte) {
   // If new start appears mid-frame, resync
   if (s_rx_state == RX_COLLECT && byte == YX5200_FRAME_START) {
     yx5200_rx_reset_parser();
@@ -201,6 +221,7 @@ void yx5200_rx_process_bytes(const uint8_t *data, size_t len) {
 void yx5200_rx_start_it(void) {
   if (s_uart) {
     (void) HAL_UART_Receive_IT(s_uart, &s_rx_byte_it, 1);
+    yx5200_rx_reset_parser();
   }
 }
 
@@ -213,15 +234,67 @@ void yx5200_rx_on_cplt(UART_HandleTypeDef *huart) {
 }
 
 // Weak callbacks (user can override them)
-void __attribute__((weak)) yx5200_on_frame(const YX5200_Frame *frame) {
-  (void) frame; // default: no-op
+void yx5200_on_frame(const YX5200_Frame *frame) {
+  if (frame->cmd == YX5200_Q_FEEDBACK) {
+    switch (frame->param) {
+      case 0x0:
+        //ACK
+        query_state = QS_ACK;
+        return;
+    }
+  } else if (frame->cmd == YX5200_Q_ERROR) {
+    query_state = QS_ERROR;
+    //TODO: add error handle
+    switch (frame->param) {
+      case 0x1:
+        //Module busy (this info is returned when the initialization is not done)
+        break;
+      case 0x2:
+        //Currently sleep mode(supports only specified device in sleep mode)
+        break;
+      case 0x3:
+        //Serial receiving error(a frame has not been received completely yet)
+        break;
+      case 0x4:
+        //Checksum incorrect
+        break;
+      case 0x5:
+        //Specified track is out of current track scope
+        break;
+      case 0x6:
+        //Specified track is not found
+        break;
+      case 0x7:
+        //Insertion error(an inserting operation only can be done when a track is being played)
+        break;
+      case 0x8:
+        //SD card reading failed(SD card pulled out or damaged)
+        break;
+      case 0xA:
+        //Entered into sleep mode
+        break;
+    }
+    return;
+  } else if (frame->cmd == YX5200_Q_DEVICE_PLUGGED_IN) {
+    return;
+  } else if (frame->cmd == YX5200_Q_DEVICE_PULLED_OUT) {
+    return;
+  } else if (frame->cmd == YX5200_Q_INITIALIZE) {
+    query_state = QS_ACK;
+    return;
+  }
 }
 
-void __attribute__((weak)) yx5200_on_frame_error(YX5200_RxError error) {
-  (void) error; // default: no-op
+void yx5200_on_frame_error(YX5200_RxError error) {
+  //TODO: add weak callback to handle errors
+  query_state = QS_ERROR;
 }
 
 // ---- High-level API ----
+
+void yx5200_initialize(void) {
+  yx5200_send_command(YX5200_Q_INITIALIZE, 0);
+}
 
 void yx5200_next(void) {
   yx5200_send_command(YX5200_CMD_NEXT, 0);
@@ -312,12 +385,8 @@ void yx5200_query_is_flash(void) {
   yx5200_send_command(YX5200_Q_IS_FLASH, 0);
 }
 
-void yx5200_retransmit(void) {
-  yx5200_send_command(YX5200_Q_RETRANSMIT, 0);
-}
-
 void yx5200_response(void) {
-  yx5200_send_command(YX5200_Q_RESPONSE, 0);
+  yx5200_send_command(YX5200_Q_FEEDBACK, 0);
 }
 
 void yx5200_query_status(void) {

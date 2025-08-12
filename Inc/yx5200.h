@@ -9,7 +9,7 @@ extern "C" {
 #include <stddef.h> // size_t
 
 // Library initialization: pass the UART the module is connected to
-void yx5200_init(UART_HandleTypeDef *huart, uint8_t feedback);
+void yx5200_configure(UART_HandleTypeDef *huart, uint8_t feedback);
 
 // ---- RX support (optional) ----
 
@@ -30,26 +30,20 @@ typedef enum {
     YX5200_RX_ERR_BAD_CSUM = 4   // checksum mismatch
 } YX5200_RxError;
 
-// Reset internal RX parser state
-void yx5200_rx_reset_parser(void);
-
-// Feed single byte into the parser (call from your RX path)
-void yx5200_rx_process_byte(uint8_t byte);
-
 // Feed multiple bytes (e.g., DMA+IDLE chunk)
 void yx5200_rx_process_bytes(const uint8_t *data, size_t len);
 
 // Helper to start 1-byte IT reception on stored UART
-// Call once after yx5200_init if you want interrupt-driven RX
+// Call once after yx5200_configure if you want interrupt-driven RX
 void yx5200_rx_start_it(void);
 
 // Call from your HAL_UART_RxCpltCallback (or equivalent) to process a received byte and restart IT reception
 void yx5200_rx_on_cplt(UART_HandleTypeDef *huart);
 
-// Weak callbacks you can override in your code to handle frames and errors
-void __attribute__((weak)) yx5200_on_frame(const YX5200_Frame *frame);
+// Callbacks to handle frames and errors
+void yx5200_on_frame(const YX5200_Frame *frame);
 
-void __attribute__((weak)) yx5200_on_frame_error(YX5200_RxError error);
+void yx5200_on_frame_error(YX5200_RxError error);
 
 // Equalizer presets
 typedef enum {
@@ -77,6 +71,9 @@ typedef enum {
     YX5200_SRC_SLEEP = 3,
     YX5200_SRC_FLASH = 4
 } YX5200_Source;
+
+//Initialization
+void yx5200_initialize(void);
 
 // Playback control
 void yx5200_next(void);
@@ -115,8 +112,6 @@ void yx5200_query_is_usb(void);
 void yx5200_query_is_sd(void);
 
 void yx5200_query_is_flash(void);
-
-void yx5200_retransmit(void);
 
 void yx5200_response(void);              // Purpose depends on module firmware
 

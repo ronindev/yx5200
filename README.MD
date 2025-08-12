@@ -33,8 +33,8 @@ Pass your HAL UART handle and whether you want feedback replies.
 extern UART_HandleTypeDef huartX; // your configured UART
 int main(void) { 
     // ... HAL_Init(), clocks, GPIO, UART init ... 
-    yx5200_init(&huartX, 0); // feedback: 0 = no replies, 1 = request replies
-
+    yx5200_configure(&huartX, 0); // feedback: 0 = no replies, 1 = request replies
+    yx5200_initialize(); // initialize after configuration
     while (1) {
         // ...
     }
@@ -68,17 +68,16 @@ yx5200_repeat_current(0);
 Set feedback to 1 at initialization to request device replies.
 
 ```c
-yx5200_init(&huartX, 1); // request replies
+yx5200_configure(&huartX, 1); // request replies
 ```
 
 You have two options to feed received bytes into the parser.
 
 ### Option A: Interrupt-driven RX (1-byte IT)
 
-- Reset the parser and start IT reception once after init:
+- Start IT reception once after init:
 
 ```c
-yx5200_rx_reset_parser(); 
 yx5200_rx_start_it();
 ```
 
@@ -101,33 +100,16 @@ If you already receive into a ring or linear DMA buffer and detect IDLE:
 yx5200_rx_process_bytes(data, len);
 ```
 
-### Handling parsed frames and errors
-
-Override weak callbacks in your application to handle responses:
-
-```c
-void yx5200_on_frame(const YX5200_Frame* f) { // f->cmd, f->param, etc. // Example: log or update state machine }
-void yx5200_on_frame_error(YX5200_RxError e) { // Optional: diagnostics (bad start/end, length, checksum) }
-```
-
-Notes:
-
-- Devices reply only if protocol feedback byte is 1 and the module firmware supports/permits replies.
-- The parser expects the standard 10-byte frame:
-    - Start 0x7E, Version 0xFF, Length 0x06, Cmd, Feedback, ParamH, ParamL, ChecksumH, ChecksumL, End 0xEF.
-
 ## API Overview
 
 Initialization and RX:
 
-- void yx5200_init(UART_HandleTypeDef* huart, uint8_t feedback);
-- void yx5200_rx_reset_parser(void);
+- void yx5200_configure(UART_HandleTypeDef* huart, uint8_t feedback);
+- void yx5200_initialize(void);
 - void yx5200_rx_process_byte(uint8_t byte);
 - void yx5200_rx_process_bytes(const uint8_t* data, size_t len);
 - void yx5200_rx_start_it(void);
 - void yx5200_rx_on_cplt(UART_HandleTypeDef* huart);
-- void yx5200_on_frame(const YX5200_Frame* frame); // weak
-- void yx5200_on_frame_error(YX5200_RxError error); // weak
 
 Playback and settings:
 
@@ -154,7 +136,6 @@ Queries (require feedback=1 for responses):
 - void yx5200_query_is_usb(void);
 - void yx5200_query_is_sd(void);
 - void yx5200_query_is_flash(void);
-- void yx5200_retransmit(void);
 - void yx5200_response(void);
 - void yx5200_query_status(void);
 - void yx5200_query_volume(void);
@@ -202,7 +183,7 @@ checksum = (uint16_t)(0 - (ver + len + cmd + feedback + DH + DL))
 ## Timing and Blocking Behavior
 
 - Transmits are blocking (HAL_UART_Transmit with HAL_MAX_DELAY).
-- A small delay (~100 ms) is inserted after each command to avoid overruns on slower modules.
+- A small delay (~100 ms) is inserted after each command to avoid overruns on slower modules if no feedback is requested.
     - You may tune or remove it if your setup is stable and responsive.
 
 ## Integration Tips
