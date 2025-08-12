@@ -7,7 +7,7 @@ receiving and parsing device responses when feedback is enabled.
 - MCU stack: STM32 HAL UART
 - Language: C11
 
-Note: by default, transmissions are blocking and include a short post-send delay for robustness.
+Note: If feedback is disabled, transmissions are blocking and include a 100 ms post-send delay for robustness.
 
 ## Features
 
@@ -59,8 +59,8 @@ yx5200_play();
 // Next / previous yx5200_next(); 
 yx5200_previous();
 // Repeat current track: on/off 
-yx5200_repeat_current(1); 
-yx5200_repeat_current(0);
+yx5200_play_all(1); 
+yx5200_play_all(0);
 ```
 
 ## Enabling Feedback and Receiving Replies (Optional)
@@ -99,56 +99,6 @@ If you already receive into a ring or linear DMA buffer and detect IDLE:
 // data,len = the new bytes captured since the last IDLE 
 yx5200_rx_process_bytes(data, len);
 ```
-
-## API Overview
-
-Initialization and RX:
-
-- void yx5200_configure(UART_HandleTypeDef* huart, uint8_t feedback);
-- void yx5200_initialize(void);
-- void yx5200_rx_process_byte(uint8_t byte);
-- void yx5200_rx_process_bytes(const uint8_t* data, size_t len);
-- void yx5200_rx_start_it(void);
-- void yx5200_rx_on_cplt(UART_HandleTypeDef* huart);
-
-Playback and settings:
-
-- void yx5200_next(void);
-- void yx5200_previous(void);
-- void yx5200_play_track(uint16_t index); // 0..2999
-- void yx5200_volume_up(void);
-- void yx5200_volume_down(void);
-- void yx5200_set_volume(uint8_t volume); // 0..30
-- void yx5200_set_equalizer(YX5200_Equalizer eq);
-- void yx5200_set_play_mode(YX5200_PlayMode mode);
-- void yx5200_set_source(YX5200_Source src);
-- void yx5200_mode_on(void);
-- void yx5200_mode_normal(void);
-- void yx5200_reset(void);
-- void yx5200_play(void);
-- void yx5200_pause(void);
-- void yx5200_play_folder_file(uint8_t folder, uint8_t file); // folder 01..99
-- void yx5200_set_volume_gain(uint8_t enabled, uint8_t gain); // enabled=1, gain 0..31
-- void yx5200_repeat_current(uint8_t enable); // 1=repeat, 0=stop
-
-Queries (require feedback=1 for responses):
-
-- void yx5200_query_is_usb(void);
-- void yx5200_query_is_sd(void);
-- void yx5200_query_is_flash(void);
-- void yx5200_response(void);
-- void yx5200_query_status(void);
-- void yx5200_query_volume(void);
-- void yx5200_query_equalizer(void);
-- void yx5200_query_play_mode(void);
-- void yx5200_query_software(void);
-- void yx5200_query_sd_files(void);
-- void yx5200_query_usb_files(void);
-- void yx5200_query_flash_files(void);
-- void yx5200_query_on(void);
-- void yx5200_query_sd_current(void);
-- void yx5200_query_usb_current(void);
-- void yx5200_query_flash_current(void);
 
 ## Parameter Ranges
 
@@ -190,6 +140,8 @@ checksum = (uint16_t)(0 - (ver + len + cmd + feedback + DH + DL))
 
 - Ensure UART TX and RX are configured at the module’s expected baud rate (commonly 9600 8N1).
 - If you only need one-way control, initialize with feedback = 0 and omit RX integration.
+- If you implement Interrupt-driven RX reception:
+    - Make sure to call `yx5200_rx_on_cplt(huartX)` in your HAL UART RX complete callback. 
 - If you implement DMA+IDLE reception:
     - Make sure to provide contiguous data slices to `yx5200_rx_process_bytes(...)`.
     - Handle buffer wrap-around in your DMA ring before feeding the parser.

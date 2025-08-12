@@ -72,71 +72,112 @@ typedef enum {
     YX5200_SRC_FLASH = 4
 } YX5200_Source;
 
-//Initialization
-void yx5200_initialize(void);
+// Response codes
+typedef enum {
+    YX5200_OK = 0x00, // Ok!
+    YX5200_ERR_MODULE_BUSY = 0x01, // Module busy (initialization not finished)
+    YX5200_ERR_SLEEP_MODE = 0x02, // Currently in sleep mode
+    YX5200_ERR_SERIAL_RX = 0x03, // Serial receiving error (frame not fully received)
+    YX5200_ERR_CHECKSUM = 0x04, // Checksum incorrect
+    YX5200_ERR_TRACK_OUT_OF_RANGE = 0x05, // Specified track out of range
+    YX5200_ERR_TRACK_NOT_FOUND = 0x06, // Specified track not found
+    YX5200_ERR_INSERTION = 0x07, // Insertion error (allowed only while playing)
+    YX5200_ERR_SD_READ_FAIL = 0x08, // SD card read failed (removed or damaged)
+    YX5200_ERR_ENTER_SLEEP = 0x0A,  // Entered sleep mode
+    YX5200_ERR_TIMEOUT = 0x0B, // Timeout
+    YX5200_ERR_BAD_CONFIGURATION = 0x0C, // UART is not configured. Call yx5200_configure() first
+} YX5200_Response;
+
+typedef enum {
+    STATUS_USB = 0x01, // USB flash drive
+    STATUS_SD = 0x02, //SD card
+    STATUS_SLEEP = 0x10 //Module in sleep mode
+} MSBStatus;
+
+typedef enum {
+    STATUS_STOPPED = 0x0,
+    STATUS_PLAYING = 0x1,
+    STATUS_PAUSED = 0x2
+} LSBStatus;
+
+typedef struct {
+    volatile LSBStatus playerStatus;  // Second status byte
+    volatile MSBStatus mediaSource;  // First status byte
+} DeviceStatus;
+
+//Initialization (query media status)
+YX5200_Response yx5200_initialize(void);
 
 // Playback control
-void yx5200_next(void);
+YX5200_Response yx5200_next(void);
 
-void yx5200_previous(void);
+YX5200_Response yx5200_previous(void);
 
-void yx5200_play_track(uint16_t index);             // Plays track by global index (0..2999)
-void yx5200_volume_up(void);
+YX5200_Response yx5200_play_track(uint16_t index);             // Plays track by global index (0..2999)
+YX5200_Response yx5200_volume_up(void);
 
-void yx5200_volume_down(void);
+YX5200_Response yx5200_volume_down(void);
 
-void yx5200_set_volume(uint8_t volume);             // 0..30
-void yx5200_set_equalizer(YX5200_Equalizer eq);
+YX5200_Response yx5200_set_volume(uint8_t volume);             // 0..30
+YX5200_Response yx5200_set_equalizer(YX5200_Equalizer eq);
 
-void yx5200_set_play_mode(YX5200_PlayMode mode);
+YX5200_Response yx5200_set_play_mode(YX5200_PlayMode mode);
 
-void yx5200_set_source(YX5200_Source src);
+YX5200_Response yx5200_set_source(YX5200_Source src);
 
-void yx5200_mode_on(void);
+// Sleep/wakeup control. Maybe not working.
+YX5200_Response yx5200_sleep(void);
+YX5200_Response yx5200_wakeup(void);
 
-void yx5200_mode_normal(void);
+// Reset device.
+YX5200_Response yx5200_reset(void);
 
-void yx5200_reset(void);
+// Play/pause control.
+YX5200_Response yx5200_play(void);
+YX5200_Response yx5200_pause(void);
 
-void yx5200_play(void);
+YX5200_Response yx5200_play_folder_file(uint8_t folder, uint8_t file); // Plays selected folder and file (folder 01..99)
+// Maybe not working.
+YX5200_Response yx5200_set_volume_gain(uint8_t enabled, uint8_t gain); // High=1 to enable, Low=gain 0..31
+// Play all the tracks in the device ceaselessly again and again until it receives a command for stop or pause
+// 0 argument may stop Behavior.
+YX5200_Response yx5200_play_all(uint8_t enable);
 
-void yx5200_pause(void);
+// Media status. To re-query status, call yx5200_initialize()
+// Determine if USB online
+uint8_t yx5200_is_usb_online(void);
 
-void yx5200_play_folder_file(uint8_t folder, uint8_t file); // Plays selected folder and file (folder 01..99)
-void yx5200_set_volume_gain(uint8_t enabled, uint8_t gain); // High=1 to enable, Low=gain 0..31
-void yx5200_repeat_current(uint8_t enable);                  // 1 = repeat current, 0 = stop
+// Determine if SD online
+uint8_t yx5200_is_sd_online(void);
+
+// Determine if PC online
+uint8_t yx5200_is_pc_online(void);
 
 // Queries (a device will reply if feedback is enabled in firmware/config)
-void yx5200_query_is_usb(void);
 
-void yx5200_query_is_sd(void);
+YX5200_Response yx5200_query_status(void);
+DeviceStatus yx5200_get_status(void);
 
-void yx5200_query_is_flash(void);
+YX5200_Response yx5200_query_volume(void);
 
-void yx5200_response(void);              // Purpose depends on module firmware
+YX5200_Response yx5200_query_equalizer(void);
 
-void yx5200_query_status(void);
+YX5200_Response yx5200_query_play_mode(void);
 
-void yx5200_query_volume(void);
+YX5200_Response yx5200_query_software(void);
 
-void yx5200_query_equalizer(void);
+YX5200_Response yx5200_query_sd_files(void);
 
-void yx5200_query_play_mode(void);
+YX5200_Response yx5200_query_usb_files(void);
 
-void yx5200_query_software(void);
+YX5200_Response yx5200_query_flash_files(void);
 
-void yx5200_query_sd_files(void);
+YX5200_Response yx5200_query_on(void);              // Purpose depends on module firmware
+YX5200_Response yx5200_query_sd_current(void);
 
-void yx5200_query_usb_files(void);
+YX5200_Response yx5200_query_usb_current(void);
 
-void yx5200_query_flash_files(void);
-
-void yx5200_query_on(void);              // Purpose depends on module firmware
-void yx5200_query_sd_current(void);
-
-void yx5200_query_usb_current(void);
-
-void yx5200_query_flash_current(void);
+YX5200_Response yx5200_query_flash_current(void);
 
 #ifdef __cplusplus
 }
