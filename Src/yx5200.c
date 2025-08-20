@@ -19,13 +19,14 @@ typedef enum {
     QS_TIMEOUT,
 } QueryState;
 static volatile uint8_t s_rx_pos = 0;
-static volatile uint8_t query_state = QS_WAITING;
-static volatile uint8_t s_error = 0;
+static volatile QueryState s_query_state = QS_WAITING;
+static volatile YX5200_Response s_error = 0;
 // 1-byte buffer for HAL IT reception
 static uint8_t s_rx_byte_it = 0;
 
 //Media online status
 typedef enum {
+    MEDIA_UNKNOWN = 0,
     USB_ONLINE = 1,
     SD_CARD_ONLINE = 2,
     USB_AND_SD_CARD_ONLINE = 3,
@@ -37,8 +38,9 @@ static volatile MediaState s_media_state = 0;
 static DeviceStatus s_device_status;
 
 static void processDevicePlugIn(const YX5200_Frame *frame);
-
 static void processDevicePullOff(const YX5200_Frame *frame);
+
+static void yx5200_on_frame(const YX5200_Frame *frame);
 
 // Frame constants for YX5200 serial protocol
 static const uint8_t YX5200_FRAME_START = 0x7E;
@@ -55,7 +57,7 @@ typedef enum {
     YX5200_CMD_VOLUME_DOWN = 0x05,
     YX5200_CMD_SET_VOLUME = 0x06, // 0..30
     YX5200_CMD_SET_EQUALIZER = 0x07,
-    YX5200_CMD_SET_PLAY_MODE = 0x08,
+    YX5200_CMD_PLAY_INDEX_LOOP = 0x08,
     YX5200_CMD_SET_SOURCE = 0x09,
     YX5200_CMD_SLEEP = 0x0A,
     YX5200_CMD_WAKEUP = 0x0B,
@@ -64,29 +66,60 @@ typedef enum {
     YX5200_CMD_PAUSE = 0x0E,
     YX5200_CMD_PLAY_FOLDER_FILE = 0x0F, // DH=folder (01~99), DL=track
     YX5200_CMD_SET_VOLUME_GAIN = 0x10, // High byte = 1 to enable preset volume, Low byte = gain 0..31
-    YX5200_CMD_PLAY_ALL = 0x11  // 1 = repeat current track, 0 = stop
+    YX5200_CMD_PLAY_ALL = 0x11,  // 1 = repeat tracks in the root directory of a storage device, 0 = stop
+    YX5200_CMD_PLAY_MP3_FOLDER = 0x12,
+    YX5200_CMD_INSERT_AD = 0x13, //Insert an advertisement (from folder "ADVERT") while playing a track
+    YX5200_CMD_PLAY_BIG_FOLDER = 0x14,
+    YX5200_CMD_STOP_AD = 0x15, //Stop playing inserted ad
+    YX5200_CMD_STOP = 0x16, //Stop playing track
+    YX5200_CMD_PLAY_FOLDER_LOOP = 0x17, //Specify repeat playback of a folder
+    YX5200_CMD_PLAY_RANDOM = 0x18,
+    YX5200_CMD_LOOP = 0x19,
+    YX5200_CMD_DAC = 0x1A,
+    YX5200_CMD_COMBINATION_PLAYBACK = 0x21, // TODO: Combination playback
+    YX5200_CMD_PLAY_WITH_VOLUME = 0x22, // TODO: Play with volume
+    YX5200_CMD_INSERT_AD_FROM_FOLDER = 0x25, // TODO: Ad from folder
 } YX5200_Command;
 
 // Query codes
 typedef enum {
-    YX5200_Q_DEVICE_PLUGGED_IN = 0x3A,
-    YX5200_Q_DEVICE_PULLED_OUT = 0x3B,
     YX5200_Q_MEDIA_STATE = 0x3F,
     YX5200_Q_ERROR = 0x40,
     YX5200_Q_FEEDBACK = 0x41,
     YX5200_Q_STATUS = 0x42,
     YX5200_Q_VOLUME = 0x43,
     YX5200_Q_EQUALIZER = 0x44,
-    YX5200_Q_PLAY_MODE = 0x45,
-    YX5200_Q_SOFTWARE = 0x46,
-    YX5200_Q_SD_FILES = 0x47,
-    YX5200_Q_USB_FILES = 0x48,
+    YX5200_Q_USB_FILES = 0x47,
+    YX5200_Q_SD_FILES = 0x48,
     YX5200_Q_FLASH_FILES = 0x49,
-    YX5200_Q_ON = 0x4A,
+    YX5200_Q_ON = 0x4A, //TODO: I have no idea what this is?
     YX5200_Q_SD_CURRENT = 0x4B,
     YX5200_Q_USB_CURRENT = 0x4C,
-    YX5200_Q_FLASH_CURRENT = 0x4D
+    YX5200_Q_FLASH_CURRENT = 0x4D,
+    YX5200_Q_FOLDER_FILES_COUNT = 0x4E,
 } YX5200_Query;
+
+// Event codes
+typedef enum {
+    YX5200_EVENT_DEVICE_PLUGGED_IN = 0x3A,
+    YX5200_EVENT_DEVICE_PULLED_OUT = 0x3B,
+    YX5200_EVENT_USB_TRACK_FINISHED = 0x3C,
+    YX5200_EVENT_SD_TRACK_FINISHED = 0x3D,
+    YX5200_EVENT_FLASH_TRACK_FINISHED = 0x3E,
+    YX5200_EVENT_MEDIA_STATE = 0x3F,
+    YX5200_EVENT_ERROR = 0x40,
+    YX5200_EVENT_FEEDBACK = 0x41,
+    YX5200_EVENT_STATUS = 0x42,
+    YX5200_EVENT_VOLUME = 0x43,
+    YX5200_EVENT_EQUALIZER = 0x44,
+    YX5200_EVENT_SD_FILES = 0x47,
+    YX5200_EVENT_USB_FILES = 0x48,
+    YX5200_EVENT_FLASH_FILES = 0x49,
+    YX5200_EVENT_ON = 0x4A,
+    YX5200_EVENT_SD_CURRENT = 0x4B,
+    YX5200_EVENT_USB_CURRENT = 0x4C,
+    YX5200_EVENT_FLASH_CURRENT = 0x4D
+} YX5200_Event;
 
 // Byte helpers
 static inline uint8_t lo8(uint16_t v) { return (uint8_t) (v & 0xFF); }
@@ -129,17 +162,21 @@ static YX5200_Response yx5200_send_command(uint8_t cmd, uint16_t param) {
   frame[8] = lo8(checksum);
   frame[9] = YX5200_FRAME_END;
 
-  HAL_UART_Transmit(s_uart, frame, sizeof(frame), HAL_MAX_DELAY);
-  query_state = QS_WAITING;
+  s_query_state = QS_WAITING;
+  if (HAL_UART_Transmit(s_uart, frame, sizeof(frame), 100) != HAL_OK) {
+    s_query_state = QS_ERROR;
+    return YX5200_ERR_TX;
+  }
   if (s_feedback) {
     uint32_t startTime = HAL_GetTick();
-    while (query_state != QS_ACK && query_state != QS_ERROR) {
+    while (s_query_state != QS_ACK && s_query_state != QS_ERROR) {
       if (HAL_GetTick() - startTime > 100) {
-        query_state = QS_TIMEOUT;
+        s_query_state = QS_TIMEOUT;
         return YX5200_ERR_TIMEOUT;
       }
+      HAL_Delay(1);
     }
-    if (query_state == QS_ERROR) {
+    if (s_query_state == QS_ERROR) {
       return s_error;
     }
     HAL_Delay(20); // If no delay is added, the device may not respond to the next command
@@ -165,7 +202,8 @@ static void yx5200_parser_push(uint8_t b) {
         s_rx_pos = 1;
         s_rx_state = RX_COLLECT;
       } else {
-        yx5200_on_frame_error(YX5200_RX_ERR_BAD_START);
+        s_error = YX5200_RX_ERR_BAD_START;
+        s_query_state = QS_ERROR;
       }
       break;
 
@@ -177,12 +215,14 @@ static void yx5200_parser_push(uint8_t b) {
         const uint8_t *f = s_rx_buf;
 
         if (f[9] != YX5200_FRAME_END) {
-          yx5200_on_frame_error(YX5200_RX_ERR_BAD_END);
+          s_error = YX5200_RX_ERR_BAD_END;
+          s_query_state = QS_ERROR;
           yx5200_rx_reset_parser();
           return;
         }
         if (f[1] != YX5200_PROTOCOL_VER || f[2] != YX5200_FRAME_LENGTH) {
-          yx5200_on_frame_error((f[2] != YX5200_FRAME_LENGTH) ? YX5200_RX_ERR_BAD_LENGTH : YX5200_RX_ERR_BAD_CSUM);
+          s_error = ((f[2] != YX5200_FRAME_LENGTH) ? YX5200_RX_ERR_BAD_LENGTH : YX5200_RX_ERR_BAD_CSUM);
+          s_query_state = QS_ERROR;
           yx5200_rx_reset_parser();
           return;
         }
@@ -194,7 +234,8 @@ static void yx5200_parser_push(uint8_t b) {
         const uint16_t calc = yx5200_compute_checksum(cmd, param, fb);
 
         if (csum != calc) {
-          yx5200_on_frame_error(YX5200_RX_ERR_BAD_CSUM);
+          s_error = YX5200_RX_ERR_BAD_CSUM;
+          s_query_state = QS_ERROR;
           yx5200_rx_reset_parser();
           return;
         }
@@ -214,9 +255,9 @@ static void yx5200_parser_push(uint8_t b) {
   }
 }
 
-// Feed single byte into the parser (call from your RX path)
+// Feed a single byte into the parser (call from your RX path)
 static void yx5200_rx_process_byte(uint8_t byte) {
-  // If new start appears mid-frame, resync
+  // If a new start appears mid-frame, resync
   if (s_rx_state == RX_COLLECT && byte == YX5200_FRAME_START) {
     yx5200_rx_reset_parser();
     s_rx_buf[0] = byte;
@@ -254,28 +295,45 @@ void yx5200_rx_on_cplt(UART_HandleTypeDef *huart) {
 
 // Weak callbacks (user can override them)
 void yx5200_on_frame(const YX5200_Frame *frame) {
-  if (frame->cmd == YX5200_Q_FEEDBACK) {
-    //ACK
-    query_state = QS_ACK;
-  } else if (frame->cmd == YX5200_Q_ERROR) {
-    query_state = QS_ERROR;
-    s_error = frame->param;
-    return;
-  } else if (frame->cmd == YX5200_Q_DEVICE_PLUGGED_IN) {
-    processDevicePlugIn(frame);
-    return;
-  } else if (frame->cmd == YX5200_Q_DEVICE_PULLED_OUT) {
-    processDevicePullOff(frame);
-    return;
-  } else if (frame->cmd == YX5200_Q_MEDIA_STATE) {
-    s_media_state = frame->param;
-    query_state = QS_ACK;
-    return;
-  } else if (frame->cmd == YX5200_Q_STATUS) {
-    s_device_status.mediaSource = hi8(frame->param);
-    s_device_status.playerStatus = lo8(frame->param);
-    query_state = QS_ACK;
-    return;
+  switch (frame->cmd) {
+    case YX5200_EVENT_FEEDBACK:
+      //ACK
+      s_query_state = QS_ACK;
+      break;
+
+    case YX5200_EVENT_ERROR:
+      s_query_state = QS_ERROR;
+      s_error = frame->param;
+      return;
+
+    case YX5200_EVENT_DEVICE_PLUGGED_IN:
+      processDevicePlugIn(frame);
+      return;
+
+    case YX5200_EVENT_DEVICE_PULLED_OUT:
+      processDevicePullOff(frame);
+      return;
+
+    case YX5200_EVENT_MEDIA_STATE:
+      s_media_state = frame->param;
+      s_query_state = QS_ACK;
+      return;
+
+    case YX5200_EVENT_STATUS:
+      s_device_status.mediaSource = hi8(frame->param);
+      s_device_status.playerStatus = lo8(frame->param);
+      s_query_state = QS_ACK;
+      return;
+
+    case YX5200_EVENT_SD_TRACK_FINISHED:
+      yx5200_on_track_finished_callback(YX5200_MEDIA_SD, frame->param);
+      break;
+    case YX5200_EVENT_USB_TRACK_FINISHED:
+      yx5200_on_track_finished_callback(YX5200_MEDIA_USB, frame->param);
+      break;
+    case YX5200_EVENT_FLASH_TRACK_FINISHED:
+      yx5200_on_track_finished_callback(YX5200_MEDIA_FLASH, frame->param);
+      break;
   }
 }
 
@@ -288,6 +346,7 @@ static void processDevicePlugIn(const YX5200_Frame *frame) {
       } else {
         s_media_state = USB_ONLINE;
       }
+      yx5200_on_media_attached_callback(YX5200_MEDIA_USB);
       break;
     case 0x2:
       //SD card
@@ -296,10 +355,12 @@ static void processDevicePlugIn(const YX5200_Frame *frame) {
       } else {
         s_media_state = SD_CARD_ONLINE;
       }
+      yx5200_on_media_attached_callback(YX5200_MEDIA_SD);
       break;
     case 0x3:
       //PC
       s_media_state = PC_ONLINE;
+      yx5200_on_media_attached_callback(YX5200_MEDIA_PC);
       break;
   }
 }
@@ -313,6 +374,7 @@ static void processDevicePullOff(const YX5200_Frame *frame) {
       } else {
         s_media_state = NO_MEDIA;
       }
+      yx5200_on_media_detached_callback(YX5200_MEDIA_USB);
       break;
     case 0x2:
       //SD card
@@ -321,17 +383,27 @@ static void processDevicePullOff(const YX5200_Frame *frame) {
       } else {
         s_media_state = NO_MEDIA;
       }
+      yx5200_on_media_detached_callback(YX5200_MEDIA_SD);
       break;
     case 0x3:
       //PC TODO: check if this is correct (maybe re-query state?)
       s_media_state = NO_MEDIA;
+      yx5200_on_media_detached_callback(YX5200_MEDIA_PC);
       break;
   }
 }
 
-void yx5200_on_frame_error(YX5200_RxError error) {
-  //TODO: add weak callback to handle errors
-  query_state = QS_ERROR;
+void __attribute__((weak)) yx5200_on_media_attached_callback(YX5200_Media media) {
+  (void)media;
+}
+
+void __attribute__((weak)) yx5200_on_media_detached_callback(YX5200_Media media) {
+  (void)media;
+}
+
+void __attribute__((weak)) yx5200_on_track_finished_callback(YX5200_Media media, uint16_t index) {
+  (void)media;
+  (void)index;
 }
 
 // ---- High-level API ----
@@ -353,8 +425,13 @@ YX5200_Response yx5200_previous(void) {
 }
 
 YX5200_Response yx5200_play_track(uint16_t index) {
-  // Plays track by global index (0..2999)
+  // Plays track by global index (1..2999)
   return yx5200_send_command(YX5200_CMD_PLAY_INDEX, index);
+}
+
+YX5200_Response yx5200_play_track_in_loop(uint16_t index) {
+  // Plays track by global index (1..2999) in loop mode
+  return yx5200_send_command(YX5200_CMD_PLAY_INDEX_LOOP, index);
 }
 
 YX5200_Response yx5200_volume_up(void) {
@@ -372,10 +449,6 @@ YX5200_Response yx5200_set_volume(uint8_t volume) {
 
 YX5200_Response yx5200_set_equalizer(YX5200_Equalizer eq) {
   return yx5200_send_command(YX5200_CMD_SET_EQUALIZER, (uint16_t) eq);
-}
-
-YX5200_Response yx5200_set_play_mode(YX5200_PlayMode mode) {
-  return yx5200_send_command(YX5200_CMD_SET_PLAY_MODE, (uint16_t) mode);
 }
 
 YX5200_Response yx5200_set_source(YX5200_Source src) {
@@ -449,14 +522,6 @@ YX5200_Response yx5200_query_equalizer(void) {
   return yx5200_send_command(YX5200_Q_EQUALIZER, 0);
 }
 
-YX5200_Response yx5200_query_play_mode(void) {
-  return yx5200_send_command(YX5200_Q_PLAY_MODE, 0);
-}
-
-YX5200_Response yx5200_query_software(void) {
-  return yx5200_send_command(YX5200_Q_SOFTWARE, 0);
-}
-
 YX5200_Response yx5200_query_sd_files(void) {
   return yx5200_send_command(YX5200_Q_SD_FILES, 0);
 }
@@ -467,10 +532,6 @@ YX5200_Response yx5200_query_usb_files(void) {
 
 YX5200_Response yx5200_query_flash_files(void) {
   return yx5200_send_command(YX5200_Q_FLASH_FILES, 0);
-}
-
-YX5200_Response yx5200_query_on(void) {
-  return yx5200_send_command(YX5200_Q_ON, 0);
 }
 
 YX5200_Response yx5200_query_sd_current(void) {

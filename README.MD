@@ -1,6 +1,6 @@
 # YX5200 (DFPlayer-compatible) UART Library
 
-A small C library to control audio modules based on the YX5200-24SS chipset (e.g., DFPlayer Mini and compatibles) via UART.  
+A small C library to control audio modules based on the YX5200 chipset (e.g., DFPlayer Mini and compatibles) via UART.  
 It formats and transmits protocol frames (0x7E ... 0xEF), provides a simple TX-only control API, and optionally supports
 receiving and parsing device responses when feedback is enabled.
 
@@ -13,7 +13,7 @@ Note: If feedback is disabled, transmissions are blocking and include a 100 ms 
 
 - Basic playback control: play, pause, next, previous, reset.
 - Play by global track index (0..2999).
-- Play file in folder (folders 01..99).
+- Play a file in a folder (folders 01..99).
 - Volume 0..30, equalizer presets (Normal/Pop/Rock/Jazz/Classic/Bass).
 - Play modes: all/folder/single/random.
 - Source selection: USB/SD/FLASH.
@@ -52,11 +52,13 @@ yx5200_set_volume(20);
 yx5200_set_equalizer(YX5200_EQ_ROCK);
 // Play by global index 
 yx5200_play_track(123);
-// Play file 001 in folder 01 
-yx5200_play_folder_file(1, 1);
-// Pause / resume yx5200_pause(); 
+// Play file 004 in folder 02 
+yx5200_play_folder_file(2, 4);
+// Pause / resume 
+yx5200_pause(); 
 yx5200_play();
-// Next / previous yx5200_next(); 
+// Next / previous 
+yx5200_next(); 
 yx5200_previous();
 // Repeat current track: on/off 
 yx5200_play_all(1); 
