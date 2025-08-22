@@ -5,7 +5,7 @@ It formats and transmits protocol frames (0x7E ... 0xEF), provides a simple cont
 receiving and parsing device responses when feedback is enabled.
 
 - MCU stack: STM32 HAL UART
-- Language: C11
+- Language: C99
 
 Note: If feedback is disabled, transmissions are blocking and include a 100 ms post-send delay for robustness.
 
@@ -129,8 +129,7 @@ yx5200_play_folder_file(2, 4);
 // Loop modes 
 yx5200_set_all_loop(1); // enable "all loop" 
 yx5200_set_all_loop(0); // disable 
-yx5200_set_single_loop(1); 
-// 0x19: loop current track on 
+yx5200_set_single_loop(1); // 0x19: loop current track on 
 yx5200_set_single_loop(0); // off 
 yx5200_play_folder_loop(2); // loop folder 02 
 // Random playback 
@@ -168,6 +167,8 @@ You have two options to feed received bytes into the parser.
 ```c
 yx5200_rx_start_it();
 ```
+
+This calls `HAL_UART_Receive_IT` with a 1-byte buffer.
 
 - In your HAL UART RX complete callback, forward the event to the library:
 
