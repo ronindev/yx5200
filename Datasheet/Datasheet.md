@@ -231,7 +231,7 @@ Format: ```$S VER Len CMD dat checksum $O```
 | 0x15                  | Stop insertion, play background           |                                            |
 | 0x16                  | Stop playback                             |                                            |
 | 0x17                  | Loop play specified folder                | See detailed explanation below             |
-| 0x18                  | Random play specified folder              |                                            |
+| 0x18                  | Random play from current media            |                                            |
 | 0x19                  | Set currently playing track for loop play |                                            |
 | 0x1A                  | Set DAC                                   | See detailed explanation below             |
 

@@ -61,13 +61,10 @@ typedef enum {
     YX5200_CMD_SET_EQUALIZER = 0x07,
     YX5200_CMD_LOOP_TRACK = 0x08,
     YX5200_CMD_SET_SOURCE = 0x09,
-    YX5200_CMD_SLEEP = 0x0A,
-    YX5200_CMD_WAKEUP = 0x0B,
     YX5200_CMD_RESET = 0x0C,
     YX5200_CMD_PLAY = 0x0D,
     YX5200_CMD_PAUSE = 0x0E,
     YX5200_CMD_PLAY_FOLDER_FILE = 0x0F, // DH=folder (01~99), DL=track
-    YX5200_CMD_SET_AMPLIFIER_GAIN = 0x10, // High byte = 1 to enable preset volume, Low byte = gain 0..31
     YX5200_CMD_SET_LOOP_PLAY_MODE = 0x11,  // 1 = repeat tracks in the root directory of a storage device, 0 = stop
     YX5200_CMD_PLAY_MP3_FOLDER = 0x12,
     YX5200_CMD_INSERT_AD = 0x13, //Insert an advertisement (from folder "ADVERT") while playing a track
@@ -78,8 +75,6 @@ typedef enum {
     YX5200_CMD_PLAY_RANDOM = 0x18,
     YX5200_CMD_LOOP = 0x19,
     YX5200_CMD_DAC = 0x1A,
-    YX5200_CMD_COMBINATION_PLAYBACK = 0x21, // TODO: Combination playback
-    YX5200_CMD_PLAY_WITH_VOLUME = 0x22, // TODO: Play with volume
     YX5200_CMD_INSERT_AD_FROM_FOLDER = 0x25,
 } YX5200_Command;
 
@@ -361,6 +356,14 @@ yx5200_error_t yx5200_set_volume(uint8_t volume) {
   return yx5200_send_command(YX5200_CMD_SET_VOLUME, volume);
 }
 
+yx5200_error_t yx5200_volume_up(void) {
+  return yx5200_send_command(YX5200_CMD_VOLUME_UP, 0);
+}
+
+yx5200_error_t yx5200_volume_down(void) {
+  return yx5200_send_command(YX5200_CMD_VOLUME_DOWN, 0);
+}
+
 yx5200_error_t yx5200_set_equalizer(yx5200_eq_t eq) {
   return yx5200_send_command(YX5200_CMD_SET_EQUALIZER, (uint16_t) eq);
 }
@@ -394,7 +397,7 @@ yx5200_error_t yx5200_play_track(uint16_t globalIndex) {
 }
 
 yx5200_error_t yx5200_play_folder_file(uint8_t folder, uint8_t file) {
-  if (folder > 99 || file > 255 || folder == 0 || file == 0) {
+  if (folder > 99 || folder == 0 || file == 0) {
     return YX5200_ERR_BAD_PARAM;
   }
   uint16_t param = ((uint16_t) folder << 8) | file;
@@ -406,7 +409,7 @@ yx5200_error_t yx5200_play_big_folder_file(uint8_t folder, uint16_t file) {
     return YX5200_ERR_BAD_PARAM;
   }
   uint16_t param = ((uint16_t) folder << 12) | file;
-  return yx5200_send_command(YX5200_CMD_PLAY_FOLDER_FILE, param);
+  return yx5200_send_command(YX5200_CMD_PLAY_BIG_FOLDER, param);
 }
 
 yx5200_error_t yx5200_play_mp3_folder(uint16_t index) {
