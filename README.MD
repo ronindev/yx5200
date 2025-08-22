@@ -99,15 +99,14 @@ Notes
 
 ### 1) Initialize the library
 
-Pass your HAL UART handle and whether you want feedback replies.
+Pass your HAL UART handle and whether you want feedback ACKs.
 
 ```c 
 // #include "yx5200.h"
 extern UART_HandleTypeDef huartX; // your configured UART
 int main(void) { 
     // ... HAL_Init(), clocks, GPIO, UART init ... 
-    yx5200_setup(&huartX, 0); // feedback: 0 = no replies, 1 = request replies
-    yx5200_initialize(); // initialize after configuration
+    yx5200_setup(&huartX, 0); // feedback: 0 = no ACKs, 1 = request ACKs
     while (1) {
         // ...
     }

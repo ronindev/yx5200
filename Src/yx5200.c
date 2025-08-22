@@ -347,15 +347,6 @@ void __attribute__((weak)) yx5200_on_track_finished_callback(yx5200_media_t medi
 
 // ---- High-level API ----
 
-yx5200_media_response_t yx5200_initialize(void) {
-  yx5200_error_t cmd = yx5200_send_command(YX5200_Q_MEDIA_STATE, 0);
-  yx5200_media_response_t resp = {.error = cmd};
-  if (cmd == YX5200_ERR_TIMEOUT) {
-    resp.data = YX5200_MEDIA_UNKNOWN;
-  }
-  return resp;
-}
-
 yx5200_error_t yx5200_set_source(yx5200_media_t src) {
   if (src != YX5200_MEDIA_SD && src != YX5200_MEDIA_USB) {
     return YX5200_ERR_BAD_PARAM;
@@ -477,6 +468,15 @@ yx5200_error_t yx5200_set_dac_config(uint8_t on) {
 
 
 // ---- Queries ----
+yx5200_media_response_t yx5200_query_media_online(void) {
+  yx5200_error_t cmd = yx5200_send_command(YX5200_Q_MEDIA_STATE, 0);
+  yx5200_media_response_t resp = {.error = cmd};
+  if (cmd == YX5200_ERR_TIMEOUT) {
+    resp.data = YX5200_MEDIA_UNKNOWN;
+  }
+  return resp;
+}
+
 yx5200_status_response_t yx5200_query_status(void) {
   // 0x42
   yx5200_error_t cmd = yx5200_send_command(YX5200_Q_STATUS, 0);

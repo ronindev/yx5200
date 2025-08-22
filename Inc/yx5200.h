@@ -149,6 +149,9 @@ yx5200_error_t yx5200_advert_stop(void);                           // 0x15
 yx5200_error_t yx5200_set_dac_config(uint8_t on);
 
 // Queries (commands with feedback)
+
+//Query available media
+yx5200_media_response_t yx5200_query_media_online(void);
 yx5200_status_response_t yx5200_query_status(void);                          // 0x42
 //Query current volume
 yx5200_response_t yx5200_query_volume(void);                          // 0x43
