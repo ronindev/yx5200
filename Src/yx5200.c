@@ -36,19 +36,6 @@ typedef struct {
     uint16_t checksum;  // as in protocol
 } yx5200_frame_t;
 
-static volatile uint16_t s_last_response = 0;
-
-static void processDevicePlugIn(const yx5200_frame_t *frame);
-
-static void processDevicePullOff(const yx5200_frame_t *frame);
-
-static void yx5200_on_frame(const yx5200_frame_t *frame);
-
-// Frame constants for YX5200 serial protocol
-static const uint8_t YX5200_FRAME_START = 0x7E;
-static const uint8_t YX5200_FRAME_END = 0xEF;
-static const uint8_t YX5200_PROTOCOL_VER = 0xFF;
-static const uint8_t YX5200_FRAME_LENGTH = 0x06;
 
 // Command codes
 typedef enum {
@@ -76,10 +63,8 @@ typedef enum {
     YX5200_CMD_LOOP = 0x19,
     YX5200_CMD_DAC = 0x1A,
     YX5200_CMD_INSERT_AD_FROM_FOLDER = 0x25,
-} YX5200_Command;
 
-// Query codes
-typedef enum {
+    // Query codes
     YX5200_Q_MEDIA_STATE = 0x3F,
     YX5200_Q_STATUS = 0x42,
     YX5200_Q_VOLUME = 0x43,
@@ -94,7 +79,7 @@ typedef enum {
     YX5200_Q_FLASH_CURRENT = 0x4D,
     YX5200_Q_FOLDER_FILES_COUNT = 0x4E,
     YX5200_Q_TOTAL_FILES_COUNT = 0x4F,
-} YX5200_Query;
+} yx5200_command;
 
 // Event codes
 typedef enum {
@@ -118,9 +103,20 @@ typedef enum {
     YX5200_RESP_FLASH_CURRENT = 0x4D
 } yx5200_response_code_t;
 
+static volatile uint16_t s_last_response = 0;
+
+static void yx5200_on_frame(const yx5200_frame_t *frame);
+
+static yx5200_response_t yx5200_simple_query(yx5200_command cmd);
+
+// Frame constants for YX5200 serial protocol
+static const uint8_t YX5200_FRAME_START = 0x7E;
+static const uint8_t YX5200_FRAME_END = 0xEF;
+static const uint8_t YX5200_PROTOCOL_VER = 0xFF;
+static const uint8_t YX5200_FRAME_LENGTH = 0x06;
+
 // Byte helpers
 static inline uint8_t lo8(uint16_t v) { return (uint8_t) (v & 0xFF); }
-
 static inline uint8_t hi8(uint16_t v) { return (uint8_t) ((v >> 8) & 0xFF); }
 
 // ---- Public: init ----
@@ -139,7 +135,7 @@ static inline uint16_t yx5200_compute_checksum(uint8_t cmd, uint16_t param, uint
 }
 
 // Send one command frame (blocking). Adds a small delay after transmitting for safety.
-static yx5200_error_t yx5200_send_command(uint8_t cmd, uint16_t param) {
+static yx5200_error_t yx5200_send_command(yx5200_command cmd, uint16_t param) {
   if (s_uart == NULL) {
     return YX5200_ERR_BAD_CONFIGURATION; // UART is not initialized
   }
@@ -493,52 +489,36 @@ yx5200_status_response_t yx5200_query_status(void) {
 
 yx5200_response_t yx5200_query_volume(void) {
   // 0x43
-  yx5200_error_t cmd = yx5200_send_command(YX5200_Q_VOLUME, 0);
-  yx5200_response_t resp = {.error = cmd};
-  if (cmd == YX5200_ERR_TIMEOUT) {
-    resp.value = s_last_response;
-  }
-  return resp;
+  return yx5200_simple_query(YX5200_Q_VOLUME);
 }
 
 yx5200_response_t yx5200_query_total_usb(void) {
   // 0x47
-  yx5200_error_t cmd = yx5200_send_command(YX5200_Q_USB_FILES, 0);
-  yx5200_response_t resp = {.error = cmd};
-  if (cmd == YX5200_ERR_TIMEOUT) {
-    resp.value = s_last_response;
-  }
-  return resp;
+  return yx5200_simple_query(YX5200_Q_USB_FILES);
 }
 
 yx5200_response_t yx5200_query_total_sd(void) {
   // 0x48
-  yx5200_error_t cmd = yx5200_send_command(YX5200_Q_SD_FILES, 0);
-  yx5200_response_t resp = {.error = cmd};
-  if (cmd == YX5200_ERR_TIMEOUT) {
-    resp.value = s_last_response;
-  }
-  return resp;
+  return yx5200_simple_query(YX5200_Q_SD_FILES);
 }
 
 yx5200_response_t yx5200_query_current_usb(void) {
 // 0x4B
-  yx5200_error_t cmd = yx5200_send_command(YX5200_Q_USB_CURRENT, 0);
-  yx5200_response_t resp = {.error = cmd};
-  if (cmd == YX5200_ERR_TIMEOUT) {
-    resp.value = s_last_response;
-  }
-  return resp;
+  return yx5200_simple_query(YX5200_Q_USB_CURRENT);
 }
 
 yx5200_response_t yx5200_query_current_sd(void) {
   // 0x4C
-  yx5200_error_t cmd = yx5200_send_command(YX5200_Q_SD_CURRENT, 0);
-  yx5200_response_t resp = {.error = cmd};
-  if (cmd == YX5200_ERR_TIMEOUT) {
-    resp.value = s_last_response;
+  return yx5200_simple_query(YX5200_Q_SD_CURRENT);
+}
+
+static yx5200_response_t yx5200_simple_query(yx5200_command cmd) {
+  yx5200_error_t resp = yx5200_send_command(cmd, 0);
+  yx5200_response_t result = {.error = resp};
+  if (resp == YX5200_ERR_TIMEOUT) {
+    result.value = s_last_response;
   }
-  return resp;
+  return result;
 }
 
 yx5200_eq_response_t yx5200_query_eq(void) {
