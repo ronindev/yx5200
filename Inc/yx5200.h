@@ -55,11 +55,6 @@ typedef struct {
 } yx5200_response_t;
 
 typedef enum {
-    STATUS_USB = 0x01, // USB flash drive
-    STATUS_SD = 0x02, // SD card
-} yx5200_msb_status;
-
-typedef enum {
     STATUS_STOPPED = 0x0,
     STATUS_PLAYING = 0x1,
     STATUS_PAUSED = 0x2
