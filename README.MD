@@ -11,12 +11,13 @@ Note: If feedback is disabled, transmissions are blocking and include a 100 ms p
 
 ## Features
 
-- Basic playback control: play, pause, next, previous, reset.
+- Basic playback control: play, pause, next, previous, reset, stop.
 - Play by global track index (1..2999).
-- Play a file in a folder (folders 01..99).
-- Volume 0..30, equalizer presets (Normal/Pop/Rock/Jazz/Classic/Bass).
-- Play modes: all/folder/single/random.
-- Source selection: USB/SD/FLASH.
+- Play a file in a folder (folders 01..99, files 1..255).
+- Volume 0..30, equalizer presets (Normal/Pop/Rock/Jazz/Classic).
+- Play modes: all loop, folder loop, single loop (current track), random.
+- Source selection: USB/SD.
+- Advertisement playback control (insert/stop).
 - Optional feedback and RX parser:
   - When enabled, the device may send responses to commands and queries.
   - Lightweight state machine to parse 10-byte frames with checksum verification.
@@ -105,7 +106,7 @@ Pass your HAL UART handle and whether you want feedback replies.
 extern UART_HandleTypeDef huartX; // your configured UART
 int main(void) { 
     // ... HAL_Init(), clocks, GPIO, UART init ... 
-    yx5200_configure(&huartX, 0); // feedback: 0 = no replies, 1 = request replies
+    yx5200_setup(&huartX, 0); // feedback: 0 = no replies, 1 = request replies
     yx5200_initialize(); // initialize after configuration
     while (1) {
         // ...
@@ -117,24 +118,38 @@ int main(void) {
 
 ```c 
 // Select source: SD card 
-yx5200_set_source(YX5200_SRC_SD);
+yx5200_set_source(YX5200_SRC_SD); 
 // Volume 20 
-yx5200_set_volume(20);
+yx5200_set_volume(20); 
 // Equalizer: Rock 
-yx5200_set_equalizer(YX5200_EQ_ROCK);
+yx5200_set_equalizer(YX5200_EQ_ROCK); 
 // Play by global index 
-yx5200_play_track(123);
+yx5200_play_track(123); 
 // Play file 004 in folder 02 
-yx5200_play_folder_file(2, 4);
-// Pause / resume 
-yx5200_pause(); 
-yx5200_play();
-// Next / previous 
-yx5200_next(); 
-yx5200_previous();
-// Repeat current track: on/off 
-yx5200_play_all(1); 
-yx5200_play_all(0);
+yx5200_play_folder_file(2, 4); 
+// Loop modes 
+yx5200_set_all_loop(1); // enable "all loop" 
+yx5200_set_all_loop(0); // disable 
+yx5200_set_single_loop(1); 
+// 0x19: loop current track on 
+yx5200_set_single_loop(0); // off 
+yx5200_play_folder_loop(2); // loop folder 02 
+// Random playback 
+yx5200_play_random(); 
+// Advertisement insert 
+yx5200_advert_play(5); // play AD track #5 
+yx5200_advert_stop(); // stop AD playback
+// Stop playback 
+yx5200_stop(); 
+
+// Examples (receive via your callbacks / polling) 
+yx5200_query_status(); // 0x42 
+yx5200_query_volume(); // 0x43 
+yx5200_query_total_usb(); // 0x47 
+yx5200_query_total_sd(); // 0x48 
+yx5200_query_current_usb(); // 0x4B 
+yx5200_query_current_sd(); // 0x4C
+
 ```
 
 ## Enabling Feedback and Receiving Replies (Optional)
@@ -142,7 +157,7 @@ yx5200_play_all(0);
 Set feedback to 1 at initialization to request device replies.
 
 ```c
-yx5200_configure(&huartX, 1); // request replies
+yx5200_setup(&huartX, 1); // request replies
 ```
 
 You have two options to feed received bytes into the parser.
@@ -177,18 +192,18 @@ yx5200_rx_process_bytes(data, len);
 ## Parameter Ranges
 
 - Volume: 0..30
-- Global track index: 0..2999
-- Folder: 1..99 (folders on SD should be named 01..99)
-- File in folder: 1..255 (depends on module firmware and naming)
+- Global track index: 1..2999
+- Folder: 1..99
+- File in folder: 1..255
+- MP3 folder track: 1..3000
 
 The library does not clamp these values; ensure correctness on the caller side.
 
 ## Protocol Details (Reference)
 
 Frame (10 bytes):
-
 - 0: 0x7E (start)
-- 1: 0xFF (version)
+- 1: 0xFF (version; fixed 0xFF)
 - 2: 0x06 (length)
 - 3: command
 - 4: feedback (0 or 1)

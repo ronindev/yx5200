@@ -240,8 +240,6 @@ Format: ```$S VER Len CMD dat checksum $O```
 | CMD Command (Query) | Corresponding Function               | Parameter (16-bit)                                   |
 |:--------------------|:-------------------------------------|:-----------------------------------------------------|
 | 0x3F                | Query online devices                 | 0 - 0x0F (lower 4 bits each represent a device)      |
-| 0x40                | Return error, request retransmission |                                                      |
-| 0x41                | Acknowledge (ACK)                    |                                                      |
 | 0x42                | Query current status                 |                                                      |
 | 0x43                | Query current volume                 |                                                      |
 | 0x44                | Query current EQ                     |                                                      |
@@ -459,8 +457,6 @@ Example:
    99 folders;
 2) Both the folder and filename must be specified simultaneously; Specifying folder and track supports both MP3 and WAV
    formats;
-3) The following two screenshots illustrate the specification of the folder and filename [as shown in the figure].
-   Please strictly follow our instructions for naming folders and filenames;
 
 Parameter commands:
 
@@ -508,11 +504,11 @@ Command: `7E FF 06 08 00 00 DL CRC_L CRC_H EF` DL represents the track to loop p
 
 Reference commands:
 
-| Command (xx xx represents checksum) | Description                                      |
-|:------------------------------------|:-------------------------------------------------|
-| 7E FF 06 08 00 00 01 xx xx EF       | Loop play the first track in the root directory  |
-| 7E FF 06 08 00 00 02 xx xx EF       | Loop play the second track in the root directory |
-| 7E FF 06 08 00 00 03 xx xx EF       | Loop play the third track in the root directory  |
+| Command (xx xx represents checksum) | Description                                              |
+|:------------------------------------|:---------------------------------------------------------|
+| 7E FF 06 08 00 00 01 xx xx EF       | Loop play the first track on the media (physical order)  |
+| 7E FF 06 08 00 00 02 xx xx EF       | Loop play the second track on the media (physical order) |
+| 7E FF 06 08 00 00 03 xx xx EF       | Loop play the third track on the media (physical order)  |
 
 ### 4.1.6 Specify Playback Device (0x09)
 
@@ -710,8 +706,8 @@ Return receive: `7E FF 06 42 00 02 00 FE B7 EF` DH=0x02, DL=0x00, indicates TF c
 
 | Value of DH in Return Data | Description      | Value of DL in Return Data | Corresponding Amplifier Board Status              |
 |:---------------------------|:-----------------|:---------------------------|:--------------------------------------------------|
-| 0X01                       | U Disk Playback  | 0x00                       | Amplifier board currently in stop playback state  |
-| 0X02                       | TF Card Playback | 0x01                       | Amplifier board currently in play state           |
+| 0x01                       | U Disk Playback  | 0x00                       | Amplifier board currently in stop playback state  |
+| 0x02                       | TF Card Playback | 0x01                       | Amplifier board currently in play state           |
 |                            |                  | 0x02                       | Amplifier board currently in pause playback state |
 
 1) The control module has 3 states open to users during decoding. Users can query to obtain the module's current status.

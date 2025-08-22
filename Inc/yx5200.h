@@ -8,46 +8,14 @@ extern "C" {
 #include "main.h"
 #include <stddef.h> // size_t
 
-// Library initialization: pass the UART the module is connected to
-void yx5200_configure(UART_HandleTypeDef *huart, uint8_t feedback);
 
-// ---- RX support (optional) ----
-
-// YX5200 parsed frame (common 10-byte frame: 0x7E ... 0xEF)
-typedef struct {
-    uint8_t version;   // usually 0xFF
-    uint8_t length;    // usually 0x06
-    uint8_t cmd;
-    uint8_t feedback;  // 0 or 1
-    uint16_t param;     // DH:DL
-    uint16_t checksum;  // as in protocol
-} YX5200_Frame;
-
+//Media online status
 typedef enum {
+    YX5200_MEDIA_UNKNOWN = 0,
     YX5200_MEDIA_USB = 1,
     YX5200_MEDIA_SD = 2,
-    YX5200_MEDIA_FLASH = 3,
     YX5200_MEDIA_PC = 4,
-} YX5200_Media;
-
-// Feed multiple bytes (e.g., DMA+IDLE chunk)
-void yx5200_rx_process_bytes(const uint8_t *data, size_t len);
-
-// Helper to start 1-byte IT reception on stored UART
-// Call once after yx5200_configure if you want interrupt-driven RX
-void yx5200_rx_start_it(void);
-
-// Call from your HAL_UART_RxCpltCallback (or equivalent) to process a received byte and restart IT reception
-void yx5200_rx_on_cplt(UART_HandleTypeDef *huart);
-
-// Called when the media is attached. Beware: this is called from an interrupt context.
-void __attribute__((weak)) yx5200_on_media_attached_callback(YX5200_Media media);
-
-// Called when the media is detached. Beware: this is called from an interrupt context.
-void __attribute__((weak)) yx5200_on_media_detached_callback(YX5200_Media media);
-
-// Called when the track finishes playing. Beware: this is called from an interrupt context.
-void __attribute__((weak)) yx5200_on_track_finished_callback(YX5200_Media media, uint16_t index);
+} yx5200_media_t;
 
 // Equalizer presets
 typedef enum {
@@ -56,27 +24,10 @@ typedef enum {
     YX5200_EQ_ROCK = 2,
     YX5200_EQ_JAZZ = 3,
     YX5200_EQ_CLASSIC = 4,
-    YX5200_EQ_BASS = 5
-} YX5200_Equalizer;
+    YX5200_EQ_BASS = 5,
+} yx5200_eq_t;
 
-// Play mode (repeat) options
-typedef enum {
-    YX5200_PM_ALL = 0, // Repeat all
-    YX5200_PM_FOLDER = 1, // Repeat folder
-    YX5200_PM_SINGLE = 2, // Repeat current track
-    YX5200_PM_RANDOM = 3  // Random
-} YX5200_PlayMode;
-
-// Input source
-typedef enum {
-    YX5200_SRC_USB = 0,
-    YX5200_SRC_SD = 1,
-    YX5200_SRC_AUX = 2, //I have no idea what is this
-    YX5200_SRC_SLEEP = 3, //Same here
-    YX5200_SRC_FLASH = 4
-} YX5200_Source;
-
-// Response codes
+// Error codes
 typedef enum {
     YX5200_OK = 0x00, // Ok!
     YX5200_ERR_MODULE_BUSY = 0x01, // Module busy (initialization not finished)
@@ -89,95 +40,128 @@ typedef enum {
     YX5200_ERR_SD_READ_FAIL = 0x08, // SD card read failed (removed or damaged)
     YX5200_ERR_ENTER_SLEEP = 0x0A,  // Entered sleep mode
     YX5200_ERR_TIMEOUT = 0x0B, // Timeout
-    YX5200_ERR_BAD_CONFIGURATION = 0x0C, // UART is not configured. Call yx5200_configure() first
-    YX5200_RX_ERR_BAD_START,  // not 0x7E
-    YX5200_RX_ERR_BAD_END,  // not 0xEF
-    YX5200_RX_ERR_BAD_LENGTH,  // length field not 0x06
-    YX5200_RX_ERR_BAD_CSUM,   // checksum mismatch
+    YX5200_ERR_BAD_CONFIGURATION = 0x0C, // UART is not configured. Call yx5200_setup() first
+    YX5200_ERR_RX_BAD_START,  // not 0x7E
+    YX5200_ERR_RX_BAD_END,  // not 0xEF
+    YX5200_ERR_RX_BAD_LENGTH,  // length field not 0x06
+    YX5200_ERR_RX_BAD_CSUM,   // checksum mismatch
     YX5200_ERR_TX,   // Transmission error
-} YX5200_Response;
+    YX5200_ERR_BAD_PARAM,   // Bad param
+} yx5200_error_t;
+
+typedef struct {
+    yx5200_error_t error;
+    uint16_t value;
+} yx5200_response_t;
 
 typedef enum {
     STATUS_USB = 0x01, // USB flash drive
-    STATUS_SD = 0x02, //SD card
-    STATUS_SLEEP = 0x10 //Module in sleep mode
-} MSBStatus;
+    STATUS_SD = 0x02, // SD card
+} yx5200_msb_status;
 
 typedef enum {
     STATUS_STOPPED = 0x0,
     STATUS_PLAYING = 0x1,
     STATUS_PAUSED = 0x2
-} LSBStatus;
+} yx5200_player_status;
 
 typedef struct {
-    volatile LSBStatus playerStatus;  // Second status byte
-    volatile MSBStatus mediaSource;  // First status byte
-} DeviceStatus;
+    yx5200_error_t error;
+    yx5200_media_t data;
+} yx5200_media_response_t;
 
-//Initialization (query media status)
-YX5200_Response yx5200_initialize(void);
+typedef struct {
+    yx5200_error_t error;
+    yx5200_media_t media;
+    yx5200_player_status player;
+} yx5200_status_response_t;
 
-// Playback control
-YX5200_Response yx5200_next(void);
-YX5200_Response yx5200_previous(void);
-YX5200_Response yx5200_play_track(uint16_t index); // Plays track by global index (0..2999).
-YX5200_Response yx5200_play_track_in_loop(uint16_t index); // Plays track by global index (0..2999). Track will be played again and again until it receives a command for stop or pause
-YX5200_Response yx5200_play_folder_file(uint8_t folder, uint8_t file); // Plays selected folder and file (folder 01..99)
-// Play/pause control.
-YX5200_Response yx5200_pause(void);
-YX5200_Response yx5200_play(void);
-// Play all the tracks in the device ceaselessly again and again until it receives a command for stop or pause
-// 0 argument may stop Behavior.
-YX5200_Response yx5200_play_all(uint8_t enable);
-YX5200_Response yx5200_volume_up(void);
-YX5200_Response yx5200_volume_down(void);
-YX5200_Response yx5200_set_volume(uint8_t volume);             // 0..30
-YX5200_Response yx5200_set_equalizer(YX5200_Equalizer eq);
-YX5200_Response yx5200_set_play_mode(YX5200_PlayMode mode); //TODO: ?
-YX5200_Response yx5200_set_source(YX5200_Source src);
-// Sleep/wakeup control. Maybe not working.
-YX5200_Response yx5200_sleep(void); // Not working on my yx5200-24ss. After this command module responds with YX5200_ERR_MODULE_BUSY
-YX5200_Response yx5200_wakeup(void); // After sleep not working either.
-// Reset device.
-YX5200_Response yx5200_reset(void);
-// Maybe not working.
-YX5200_Response yx5200_set_volume_gain(uint8_t enabled, uint8_t gain); // High=1 to enable, Low=gain 0..31
+typedef struct {
+    yx5200_error_t error;
+    yx5200_eq_t equalizer;
+} yx5200_eq_response_t;
 
-// Media status. To re-query status, call yx5200_initialize()
-// Determine if USB online
-uint8_t yx5200_is_usb_online(void);
 
-// Determine if SD online
-uint8_t yx5200_is_sd_online(void);
+// Library initialization: pass the UART the module is connected to
+void yx5200_setup(UART_HandleTypeDef *huart, uint8_t feedback);
 
-// Determine if PC online
-uint8_t yx5200_is_pc_online(void);
+// Feed multiple bytes (e.g., DMA+IDLE chunk)
+void yx5200_rx_process_bytes(const uint8_t *data, size_t len);
 
-// Queries (a device will reply if feedback is enabled in firmware/config)
+// Helper to start 1-byte IT reception on stored UART
+// Call once after yx5200_setup if you want interrupt-driven RX
+void yx5200_rx_start_it(void);
 
-YX5200_Response yx5200_query_status(void);
+// Call from your HAL_UART_RxCpltCallback (or equivalent) to process a received byte and restart IT reception
+void yx5200_rx_on_cplt(UART_HandleTypeDef *huart);
 
-DeviceStatus yx5200_get_status(void);
+// Called when the media is attached. Beware: this is called from an interrupt context.
+void __attribute__((weak)) yx5200_on_media_attached_callback(yx5200_media_t media);
 
-YX5200_Response yx5200_query_volume(void);
+// Called when the media is detached. Beware: this is called from an interrupt context.
+void __attribute__((weak)) yx5200_on_media_detached_callback(yx5200_media_t media);
 
-YX5200_Response yx5200_query_equalizer(void);
+// Called when the track finishes playing. Beware: this is called from an interrupt context.
+void __attribute__((weak)) yx5200_on_track_finished_callback(yx5200_media_t media, uint16_t index);
 
-YX5200_Response yx5200_query_play_mode(void);
+// Core send helpers
+yx5200_error_t yx5200_set_source(yx5200_media_t src);
 
-YX5200_Response yx5200_query_software(void);
+yx5200_error_t yx5200_set_volume(uint8_t vol);                     // 0..30
+yx5200_error_t yx5200_set_equalizer(yx5200_eq_t eq);
 
-YX5200_Response yx5200_query_sd_files(void);
+yx5200_error_t yx5200_play(void);
 
-YX5200_Response yx5200_query_usb_files(void);
+yx5200_error_t yx5200_pause(void);
 
-YX5200_Response yx5200_query_flash_files(void);
-YX5200_Response yx5200_query_on(void);              // Purpose depends on module firmware
-YX5200_Response yx5200_query_sd_current(void);
-YX5200_Response yx5200_query_usb_current(void);
-YX5200_Response yx5200_query_flash_current(void);
-YX5200_Response yx5200_query_folders_count(void);
-YX5200_Response yx5200_query_folder_files_count(uint16_t);
+yx5200_error_t yx5200_stop(void);
+
+yx5200_error_t yx5200_next(void);
+
+yx5200_error_t yx5200_previous(void);
+
+yx5200_error_t yx5200_reset(void);
+
+yx5200_error_t yx5200_play_track(uint16_t globalIndex);            // 1..2999
+yx5200_error_t yx5200_play_folder_file(uint8_t folder, uint8_t file); // folder 1..99, file 1..255
+yx5200_error_t yx5200_play_big_folder_file(uint8_t folder, uint16_t file); // folder 1..16, file 1..3000
+yx5200_error_t yx5200_play_mp3_folder(uint16_t index);             // 1..3000 ("MP3" folder)
+
+//Loop All Tracks in Root Directory
+yx5200_error_t yx5200_set_all_loop(uint8_t on);                    // 0x11: 1=on, 0=off
+//Set Current Track for Loop Playback
+yx5200_error_t yx5200_set_single_loop(uint8_t on);                 // 0x19: loop current track
+//Start Loop Playback of Specified Folder
+yx5200_error_t yx5200_play_folder_loop(uint8_t folder);            // 0x17: loop folder 1..99
+//Single Track Loop Play Command
+yx5200_error_t yx5200_loop_track(uint16_t globalIndex);            // 0x08: loop specific track
+//Random Playback of Device Files
+yx5200_error_t yx5200_play_random(void);                           // 0x18
+
+// Advertisement
+// Insert Advertisement from ADVERT folder
+yx5200_error_t yx5200_advert_play(uint8_t index);                  // 0x13: 1..255
+// Insert Advertisement from ADVERT{folder} folder
+yx5200_error_t yx5200_advert_play_folder(uint8_t, uint8_t); // 0x25: 1..255
+yx5200_error_t yx5200_advert_stop(void);                           // 0x15
+
+// DAC
+yx5200_error_t yx5200_set_dac_config(uint8_t on);
+
+// Queries (commands with feedback)
+yx5200_status_response_t yx5200_query_status(void);                          // 0x42
+//Query current volume
+yx5200_response_t yx5200_query_volume(void);                          // 0x43
+//Query current equalizer setting
+yx5200_eq_response_t yx5200_query_eq(void);                     // 0x44
+//Query the total number of files on the U disk
+yx5200_response_t yx5200_query_total_usb(void);                       // 0x47
+//Query the total number of files on the SD card
+yx5200_response_t yx5200_query_total_sd(void);                        // 0x48
+//Currently playing or finished playing is a physical sequence
+yx5200_response_t yx5200_query_current_usb(void);                     // 0x4B
+//Currently playing or finished playing is a physical sequence
+yx5200_response_t yx5200_query_current_sd(void);                      // 0x4C
 
 #ifdef __cplusplus
 }
